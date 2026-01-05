@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: outfit-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/outfits_test
+    username: outfit
+    password: outfit
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+  flyway:
+    enabled: false
+  cloud:
+    config:
+      enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+
+# Disable Eureka for tests
+eureka:
+  client:
+    enabled: false
+
+# Feign client configuration for tests
+feign:
+  client:
+    config:
+      user-service:
+        url: http://localhost:8081
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10000
+        permittedNumberOfCallsInHalfOpenState: 3
+    instances:
+      user-service:
+        baseConfig: default
+        recordExceptions:
+          - feign.FeignException
+          - feign.RetryableException
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+        ignoreExceptions:
+          - feign.FeignException$NotFound
+

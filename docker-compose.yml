@@ -1,0 +1,241 @@
+services:
+  # ---------- Базы данных ----------
+
+  postgres-user:
+    image: postgres:15
+    container_name: postgres-user
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: users_db
+      POSTGRES_USER: wardrobe
+      POSTGRES_PASSWORD: wardrobe
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_user_data:/var/lib/postgresql/data
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wardrobe -d users_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-wardrobe:
+    image: postgres:15
+    container_name: postgres-wardrobe
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wardrobe_db
+      POSTGRES_USER: wardrobe
+      POSTGRES_PASSWORD: wardrobe
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_wardrobe_data:/var/lib/postgresql/data
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wardrobe -d wardrobe_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-outfit:
+    image: postgres:15
+    container_name: postgres-outfit
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: outfits_db
+      POSTGRES_USER: wardrobe
+      POSTGRES_PASSWORD: wardrobe
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_outfit_data:/var/lib/postgresql/data
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wardrobe -d outfits_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------- Config Server ----------
+  config-server:
+    build:
+      context: ./microservices/config-server
+    container_name: config-server
+    restart: always
+    ports:
+      - "8888:8888"
+    environment:
+      SERVER_PORT: 8888
+      SPRING_PROFILES_ACTIVE: native
+      SPRING_CLOUD_CONFIG_SERVER_NATIVE_SEARCH_LOCATIONS: file:/app/config-repo
+    volumes:
+      - ./config-repo:/app/config-repo:ro
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8888/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------- Eureka Discovery Service ----------
+  discovery-service:
+    build:
+      context: ./microservices/discovery-service
+    container_name: discovery-service
+    restart: always
+    ports:
+      - "8761:8761"
+    depends_on:
+      config-server:
+        condition: service_healthy
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8761"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------- API Gateway ----------
+  api-gateway:
+    build:
+      context: ./microservices/api-gateway
+    container_name: api-gateway
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888"
+      SPRING_APPLICATION_NAME: api-gateway
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://discovery-service:8761/eureka/"
+    depends_on:
+      - discovery-service
+      - config-server
+      - user-service
+      - wardrobe-service
+      - outfit-service
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------- User Service ----------
+  user-service:
+    build:
+      context: ./microservices/user-service
+    container_name: user-service
+    restart: always
+    environment:
+      SERVER_PORT: 8081
+      SPRING_APPLICATION_NAME: user-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-user:5432/users_db
+      SPRING_DATASOURCE_USERNAME: wardrobe
+      SPRING_DATASOURCE_PASSWORD: wardrobe
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888"
+    depends_on:
+      postgres-user:
+        condition: service_healthy
+      discovery-service:
+        condition: service_started
+      config-server:
+        condition: service_started
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------- Wardrobe Service ----------
+  wardrobe-service:
+    build:
+      context: ./microservices/wardrobe-service
+    container_name: wardrobe-service
+    restart: always
+    environment:
+      SERVER_PORT: 8082
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888"
+      SPRING_APPLICATION_NAME: wardrobe-service
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "http://discovery-service:8761/eureka/"
+
+      # R2DBC (runtime)
+      SPRING_R2DBC_URL: r2dbc:postgresql://postgres-wardrobe:5432/wardrobe_db
+      SPRING_R2DBC_USERNAME: wardrobe
+      SPRING_R2DBC_PASSWORD: wardrobe
+
+      # JDBC (для Flyway)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-wardrobe:5432/wardrobe_db
+      SPRING_DATASOURCE_USERNAME: wardrobe
+      SPRING_DATASOURCE_PASSWORD: wardrobe
+    depends_on:
+      postgres-wardrobe:
+        condition: service_healthy
+      discovery-service:
+        condition: service_started
+      config-server:
+        condition: service_started
+      user-service:
+        condition: service_started
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------- Outfit Service ----------
+  outfit-service:
+    build:
+      context: ./microservices/outfit-service
+    container_name: outfit-service
+    restart: always
+    environment:
+      SERVER_PORT: 8083
+      SPRING_APPLICATION_NAME: outfit-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-outfit:5432/outfits_db
+      SPRING_DATASOURCE_USERNAME: wardrobe
+      SPRING_DATASOURCE_PASSWORD: wardrobe
+      SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888"
+    depends_on:
+      postgres-outfit:
+        condition: service_healthy
+      discovery-service:
+        condition: service_started
+      config-server:
+        condition: service_started
+      user-service:
+        condition: service_started
+      wardrobe-service:
+        condition: service_started
+    networks:
+      - wardrobe-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8083/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  wardrobe-network:
+    driver: bridge
+
+volumes:
+  postgres_user_data:
+  postgres_wardrobe_data:
+  postgres_outfit_data:
