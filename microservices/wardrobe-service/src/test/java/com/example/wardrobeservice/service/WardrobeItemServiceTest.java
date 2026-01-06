@@ -15,6 +15,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextImpl;
+import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -26,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
+import static org.springframework.http.HttpStatus.FORBIDDEN;
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 @ExtendWith(MockitoExtension.class)
 class WardrobeItemServiceTest {
@@ -66,6 +72,26 @@ class WardrobeItemServiceTest {
         testUser = new UserDto(1L, "test@example.com", "Test User");
     }
 
+    private JwtAuthenticationToken supervisorAuth() {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .subject("supervisor@example.com")
+                .claim("userId", "999")
+                .claim("roles", List.of("ROLE_SUPERVISOR"))
+                .build();
+        return new JwtAuthenticationToken(jwt);
+    }
+
+    private JwtAuthenticationToken userAuth(long userId) {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .subject("user" + userId + "@example.com")
+                .claim("userId", String.valueOf(userId))
+                .claim("roles", List.of("ROLE_USER"))
+                .build();
+        return new JwtAuthenticationToken(jwt);
+    }
+
     @Test
     void getItemsUpTo50_shouldReturnPagedResult() {
         // Given
@@ -74,7 +100,6 @@ class WardrobeItemServiceTest {
         int limit = 10;
         int offset = 0;
         List<WardrobeItem> items = List.of(testItem);
-        List<WardrobeItemResponseDto> itemDtos = List.of(testItemDto);
 
         when(itemRepository.findAllWithPagination(limit, offset)).thenReturn(Flux.fromIterable(items));
         when(itemRepository.countAll()).thenReturn(Mono.just(1L));
@@ -84,7 +109,10 @@ class WardrobeItemServiceTest {
         Mono<PagedResult<WardrobeItemResponseDto>> result = wardrobeItemService.getItemsUpTo50(page, size);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(
+                        ReactiveSecurityContextHolder.withSecurityContext(
+                                Mono.just(new SecurityContextImpl(supervisorAuth()))
+                        )))
                 .assertNext(pagedResult -> {
                     assertThat(pagedResult.content()).hasSize(1);
                     assertThat(pagedResult.totalElements()).isEqualTo(1L);
@@ -97,6 +125,47 @@ class WardrobeItemServiceTest {
     }
 
     @Test
+    void getItemsUpTo50_shouldUseOwnerScopedQueries_forRoleUser() {
+        int page = 0;
+        int size = 10;
+        int limit = 10;
+        int offset = 0;
+
+        WardrobeItem owned = WardrobeItem.builder()
+                .id(2L)
+                .ownerId(123L)
+                .type(ItemType.SHIRT)
+                .brand("B")
+                .color("C")
+                .season(Season.SUMMER)
+                .imageUrl("img")
+                .createdAt(Instant.now())
+                .build();
+        WardrobeItemResponseDto ownedDto = new WardrobeItemResponseDto(
+                2L, ItemType.SHIRT, "B", "C", Season.SUMMER, "img", 123L
+        );
+
+        when(itemRepository.findAllByOwnerIdWithPagination(123L, limit, offset)).thenReturn(Flux.just(owned));
+        when(itemRepository.countByOwnerId(123L)).thenReturn(Mono.just(1L));
+        when(itemMapper.toDto(owned)).thenReturn(ownedDto);
+
+        Mono<PagedResult<WardrobeItemResponseDto>> result = wardrobeItemService.getItemsUpTo50(page, size);
+
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(123L))))
+                .assertNext(paged -> {
+                    assertThat(paged.content()).hasSize(1);
+                    assertThat(paged.content().get(0).ownerId()).isEqualTo(123L);
+                    assertThat(paged.totalElements()).isEqualTo(1L);
+                })
+                .verifyComplete();
+
+        verify(itemRepository).findAllByOwnerIdWithPagination(123L, limit, offset);
+        verify(itemRepository).countByOwnerId(123L);
+        verify(itemRepository, never()).findAllWithPagination(anyInt(), anyInt());
+        verify(itemRepository, never()).countAll();
+    }
+
+    @Test
     void getItemsUpTo50_shouldLimitSizeTo50() {
         // Given
         int page = 0;
@@ -105,7 +174,9 @@ class WardrobeItemServiceTest {
         when(itemRepository.countAll()).thenReturn(Mono.just(0L));
 
         // When
-        wardrobeItemService.getItemsUpTo50(page, size).block();
+        wardrobeItemService.getItemsUpTo50(page, size)
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth()))
+                .block();
 
         // Then
         verify(itemRepository).findAllWithPagination(50, 0); // должно быть ограничено до 50
@@ -125,7 +196,7 @@ class WardrobeItemServiceTest {
         Flux<WardrobeItemResponseDto> result = wardrobeItemService.getInfiniteScroll(offset, limit);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth())))
                 .assertNext(dto -> {
                     assertThat(dto.id()).isEqualTo(1L);
                     assertThat(dto.type()).isEqualTo(ItemType.SHIRT);
@@ -143,7 +214,9 @@ class WardrobeItemServiceTest {
         when(itemRepository.findAllWithPagination(50, 0)).thenReturn(Flux.empty());
 
         // When
-        wardrobeItemService.getInfiniteScroll(offset, limit).blockLast();
+        wardrobeItemService.getInfiniteScroll(offset, limit)
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth()))
+                .blockLast();
 
         // Then
         verify(itemRepository).findAllWithPagination(50, 0); // должно быть ограничено до 50
@@ -160,7 +233,7 @@ class WardrobeItemServiceTest {
         Mono<WardrobeItemResponseDto> result = wardrobeItemService.getById(id);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
                 .assertNext(dto -> {
                     assertThat(dto.id()).isEqualTo(1L);
                     assertThat(dto.type()).isEqualTo(ItemType.SHIRT);
@@ -169,6 +242,39 @@ class WardrobeItemServiceTest {
 
         verify(itemRepository).findById(id);
         verify(itemMapper).toDto(testItem);
+    }
+
+    @Test
+    void getById_shouldReturn403_whenUserRequestsOtherOwnersItem() {
+        Long id = 1L;
+        WardrobeItem otherOwners = WardrobeItem.builder()
+                .id(id)
+                .ownerId(2L)
+                .type(ItemType.SHIRT)
+                .brand("Nike")
+                .color("Blue")
+                .season(Season.SUMMER)
+                .imageUrl("image.jpg")
+                .createdAt(Instant.now())
+                .build();
+
+        when(itemRepository.findById(id)).thenReturn(Mono.just(otherOwners));
+
+        StepVerifier.create(wardrobeItemService.getById(id)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
+                .expectErrorMatches(t ->
+                        t instanceof org.springframework.web.server.ResponseStatusException rse
+                                && rse.getStatusCode().value() == FORBIDDEN.value())
+                .verify();
+    }
+
+    @Test
+    void getById_shouldReturn401_whenNoJwtInContext() {
+        StepVerifier.create(wardrobeItemService.getById(1L))
+                .expectErrorMatches(t ->
+                        t instanceof org.springframework.web.server.ResponseStatusException rse
+                                && rse.getStatusCode().value() == UNAUTHORIZED.value())
+                .verify();
     }
 
     @Test
@@ -181,7 +287,7 @@ class WardrobeItemServiceTest {
         Mono<WardrobeItemResponseDto> result = wardrobeItemService.getById(id);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
                 .expectErrorMatches(throwable ->
                         throwable instanceof NotFoundException &&
                         throwable.getMessage().contains("Wardrobe item not found with id: 999"))
@@ -225,7 +331,7 @@ class WardrobeItemServiceTest {
         Mono<WardrobeItemResponseDto> result = wardrobeItemService.create(createDto);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
                 .assertNext(dto -> {
                     assertThat(dto.id()).isEqualTo(1L);
                     assertThat(dto.ownerId()).isEqualTo(1L);
@@ -235,6 +341,40 @@ class WardrobeItemServiceTest {
         verify(userServiceClientWrapper).getUserById(1L);
         verify(itemMapper).toEntity(createDto);
         verify(itemRepository).save(any(WardrobeItem.class));
+    }
+
+    @Test
+    void create_shouldReturn403_whenRoleUserCreatesForOtherOwner() {
+        WardrobeItemDto createDto = new WardrobeItemDto(
+                ItemType.SHIRT, "Nike", "Blue", Season.SUMMER, "image.jpg", 999L
+        );
+
+        StepVerifier.create(wardrobeItemService.create(createDto)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
+                .expectErrorMatches(t ->
+                        t instanceof org.springframework.web.server.ResponseStatusException rse
+                                && rse.getStatusCode().value() == FORBIDDEN.value())
+                .verify();
+
+        verify(userServiceClientWrapper, never()).getUserById(anyLong());
+        verify(itemRepository, never()).save(any());
+    }
+
+    @Test
+    void create_shouldAllowSupervisorToCreateForAnyOwner() {
+        WardrobeItemDto createDto = new WardrobeItemDto(
+                ItemType.SHIRT, "Nike", "Blue", Season.SUMMER, "image.jpg", 999L
+        );
+
+        when(userServiceClientWrapper.getUserById(999L)).thenReturn(Mono.just(new UserDto(999L, "x@x", "X")));
+        when(itemMapper.toEntity(createDto)).thenReturn(WardrobeItem.builder().ownerId(999L).build());
+        when(itemRepository.save(any(WardrobeItem.class))).thenReturn(Mono.just(testItem));
+        when(itemMapper.toDto(testItem)).thenReturn(testItemDto);
+
+        StepVerifier.create(wardrobeItemService.create(createDto)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth())))
+                .assertNext(dto -> assertThat(dto).isNotNull())
+                .verifyComplete();
     }
 
     @Test
@@ -249,7 +389,7 @@ class WardrobeItemServiceTest {
         Mono<WardrobeItemResponseDto> result = wardrobeItemService.create(createDto);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth())))
                 .expectErrorMatches(throwable ->
                         throwable instanceof IllegalArgumentException &&
                         throwable.getMessage().contains("User does not exist: 999"))
@@ -280,7 +420,7 @@ class WardrobeItemServiceTest {
         Mono<WardrobeItemResponseDto> result = wardrobeItemService.update(id, updateDto);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
                 .assertNext(dto -> {
                     assertThat(dto.type()).isEqualTo(ItemType.JACKET);
                     assertThat(dto.brand()).isEqualTo("Adidas");
@@ -291,6 +431,56 @@ class WardrobeItemServiceTest {
         verify(userServiceClientWrapper).getUserById(1L);
         verify(itemMapper).updateEntityFromDto(updateDto, testItem);
         verify(itemRepository).save(testItem);
+    }
+
+    @Test
+    void update_shouldReturn403_whenRoleUserUpdatesOtherOwnersItem() {
+        Long id = 1L;
+        WardrobeItem otherOwners = WardrobeItem.builder()
+                .id(id)
+                .ownerId(999L)
+                .type(ItemType.SHIRT)
+                .brand("Nike")
+                .color("Blue")
+                .season(Season.SUMMER)
+                .imageUrl("image.jpg")
+                .createdAt(Instant.now())
+                .build();
+        WardrobeItemDto updateDto = new WardrobeItemDto(
+                ItemType.SHIRT, "Nike", "Blue", Season.SUMMER, "image.jpg", 999L
+        );
+
+        when(itemRepository.findById(id)).thenReturn(Mono.just(otherOwners));
+
+        StepVerifier.create(wardrobeItemService.update(id, updateDto)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
+                .expectErrorMatches(t ->
+                        t instanceof org.springframework.web.server.ResponseStatusException rse
+                                && rse.getStatusCode().value() == FORBIDDEN.value())
+                .verify();
+
+        verify(userServiceClientWrapper, never()).getUserById(anyLong());
+        verify(itemRepository, never()).save(any());
+    }
+
+    @Test
+    void update_shouldReturn403_whenRoleUserChangesOwnerIdAwayFromSelf() {
+        Long id = 1L;
+        when(itemRepository.findById(id)).thenReturn(Mono.just(testItem));
+
+        WardrobeItemDto updateDto = new WardrobeItemDto(
+                ItemType.SHIRT, "Nike", "Blue", Season.SUMMER, "image.jpg", 999L
+        );
+
+        StepVerifier.create(wardrobeItemService.update(id, updateDto)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
+                .expectErrorMatches(t ->
+                        t instanceof org.springframework.web.server.ResponseStatusException rse
+                                && rse.getStatusCode().value() == FORBIDDEN.value())
+                .verify();
+
+        verify(userServiceClientWrapper, never()).getUserById(anyLong());
+        verify(itemRepository, never()).save(any());
     }
 
     @Test
@@ -305,7 +495,7 @@ class WardrobeItemServiceTest {
         Mono<WardrobeItemResponseDto> result = wardrobeItemService.update(id, updateDto);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth())))
                 .expectErrorMatches(throwable ->
                         throwable instanceof NotFoundException &&
                         throwable.getMessage().contains("Wardrobe item not found with id: 999"))
@@ -330,7 +520,7 @@ class WardrobeItemServiceTest {
         Mono<WardrobeItemResponseDto> result = wardrobeItemService.update(id, updateDto);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth())))
                 .expectErrorMatches(throwable ->
                         throwable instanceof IllegalArgumentException &&
                         throwable.getMessage().contains("User does not exist: 999"))
@@ -352,11 +542,34 @@ class WardrobeItemServiceTest {
         Mono<Void> result = wardrobeItemService.delete(id);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth())))
                 .verifyComplete();
 
         verify(itemRepository).existsById(id);
         verify(itemRepository).deleteById(id);
+    }
+
+    @Test
+    void delete_shouldReturn403_whenRoleUserDeletesOtherOwnersItem() {
+        Long id = 1L;
+        WardrobeItem otherOwners = WardrobeItem.builder()
+                .id(id)
+                .ownerId(999L)
+                .type(ItemType.SHIRT)
+                .brand("Nike")
+                .color("Blue")
+                .season(Season.SUMMER)
+                .imageUrl("image.jpg")
+                .createdAt(Instant.now())
+                .build();
+        when(itemRepository.findById(id)).thenReturn(Mono.just(otherOwners));
+
+        StepVerifier.create(wardrobeItemService.delete(id)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
+                .expectErrorMatches(t ->
+                        t instanceof org.springframework.web.server.ResponseStatusException rse
+                                && rse.getStatusCode().value() == FORBIDDEN.value())
+                .verify();
     }
 
     @Test
@@ -369,7 +582,7 @@ class WardrobeItemServiceTest {
         Mono<Void> result = wardrobeItemService.delete(id);
 
         // Then
-        StepVerifier.create(result)
+        StepVerifier.create(result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(supervisorAuth())))
                 .expectErrorMatches(throwable ->
                         throwable instanceof NotFoundException &&
                         throwable.getMessage().contains("Wardrobe item not found with id: 999"))

@@ -53,3 +53,6 @@ resilience4j:
         ignoreExceptions:
           - feign.FeignException$NotFound
 
+jwt:
+  secret: c3VwZXItc2VjcmV0LWtleS0zMi1ieXRlcy1sb25nISE=
+

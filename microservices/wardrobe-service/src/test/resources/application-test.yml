@@ -35,3 +35,6 @@ resilience4j:
     instances:
       user-service:
         baseConfig: default
+
+jwt:
+  secret: c3VwZXItc2VjcmV0LWtleS0zMi1ieXRlcy1sb25nISE=

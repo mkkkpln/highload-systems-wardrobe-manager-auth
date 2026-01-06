@@ -7,10 +7,12 @@ import com.example.userservice.exception.NotFoundException;
 import com.example.userservice.mapper.UserMapper;
 import com.example.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -20,6 +22,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
 
     public List<UserResponseDto> getAll() {
         return userRepository.findAll().stream()
@@ -40,6 +43,8 @@ public class UserService {
         }
 
         User user = userMapper.toEntity(userDto);
+        // Legacy create (without password) -> set a random password hash so DB never stores plain text.
+        user.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));
         user = userRepository.save(user);
         return userMapper.toDto(user);
     }

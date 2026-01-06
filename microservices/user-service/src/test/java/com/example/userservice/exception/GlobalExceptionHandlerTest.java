@@ -1,8 +1,12 @@
 package com.example.userservice.exception;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.web.server.ResponseStatusException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -47,5 +51,34 @@ class GlobalExceptionHandlerTest {
         // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(response.getBody()).isEqualTo("Internal server error");
+    }
+
+    @Test
+    void handleResponseStatusException_shouldReturnStatusAndReason() {
+        ResponseStatusException ex = new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+        ResponseEntity<String> response = handler.handleResponseStatusException(ex);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody()).isEqualTo("Invalid credentials");
+    }
+
+    @Test
+    void handleAccessDeniedException_shouldReturn403() {
+        ResponseEntity<String> response = handler.handleAccessDeniedException(new AccessDeniedException("x"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).isEqualTo("Forbidden");
+    }
+
+    @Test
+    void handleAuthenticationException_shouldReturn401() {
+        ResponseEntity<String> response = handler.handleAuthenticationException(new BadCredentialsException("x"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody()).isEqualTo("Unauthorized");
+    }
+
+    @Test
+    void handleDataIntegrityViolation_shouldReturn409() {
+        ResponseEntity<String> response = handler.handleDataIntegrityViolation(new DataIntegrityViolationException("x"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isEqualTo("Conflict");
     }
 }

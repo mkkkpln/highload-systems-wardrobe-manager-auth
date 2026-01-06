@@ -11,8 +11,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.List;
@@ -32,7 +37,10 @@ public class OutfitService {
 
     public PagedResult<OutfitResponseDto> getOutfitsUpTo50(int page, int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, 50));
-        Page<Outfit> outfitsPage = outfitRepository.findAll(pageable);
+        Jwt jwt = currentJwt();
+        Page<Outfit> outfitsPage = isSupervisor(jwt)
+                ? outfitRepository.findAll(pageable)
+                : outfitRepository.findAllByUserId(requireUserId(jwt), pageable);
 
         List<OutfitResponseDto> content = outfitsPage.getContent().stream()
                 .map(outfitMapper::toDto)
@@ -43,14 +51,25 @@ public class OutfitService {
 
     public List<OutfitResponseDto> getInfiniteScroll(int offset, int limit) {
         Pageable pageable = PageRequest.of(offset / Math.min(limit, 50), Math.min(limit, 50));
-        return outfitRepository.findAll(pageable)
-                .getContent()
+        Jwt jwt = currentJwt();
+        Page<Outfit> pageResult = isSupervisor(jwt)
+                ? outfitRepository.findAll(pageable)
+                : outfitRepository.findAllByUserId(requireUserId(jwt), pageable);
+
+        return pageResult.getContent()
                 .stream()
                 .map(outfitMapper::toDto)
                 .toList();
     }
 
     public OutfitResponseDto getById(Long id) {
+        Jwt jwt = currentJwt();
+        if (!isSupervisor(jwt)) {
+            Long userId = requireUserId(jwt);
+            if (!outfitRepository.existsByIdAndUserId(id, userId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+            }
+        }
         Outfit outfit = outfitRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Outfit not found with id: " + id));
         return outfitMapper.toDto(outfit);
@@ -58,7 +77,16 @@ public class OutfitService {
 
     @Transactional
     public OutfitResponseDto create(OutfitDto dto) {
-        userServiceClientWrapper.getUserById(dto.userId());
+        Jwt jwt = currentJwt();
+        if (!isSupervisor(jwt)) {
+            Long userId = requireUserId(jwt);
+            if (dto.userId() == null || !dto.userId().equals(userId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "User can create outfits only for self");
+            }
+        }
+
+        String authorization = "Bearer " + jwt.getTokenValue();
+        userServiceClientWrapper.getUserById(authorization, dto.userId());
 
         Outfit outfit = outfitMapper.toEntity(dto);
         applyItemsFromDto(dto, outfit);
@@ -70,7 +98,19 @@ public class OutfitService {
         Outfit outfit = outfitRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Outfit not found with id: " + id));
 
-        userServiceClientWrapper.getUserById(dto.userId());
+        Jwt jwt = currentJwt();
+        if (!isSupervisor(jwt)) {
+            Long userId = requireUserId(jwt);
+            if (outfit.getUserId() == null || !outfit.getUserId().equals(userId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+            }
+            if (dto.userId() == null || !dto.userId().equals(userId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "User can update outfits only for self");
+            }
+        }
+
+        String authorization = "Bearer " + jwt.getTokenValue();
+        userServiceClientWrapper.getUserById(authorization, dto.userId());
 
         outfitMapper.updateEntityFromDto(dto, outfit);
         applyItemsFromDto(dto, outfit);
@@ -79,6 +119,14 @@ public class OutfitService {
 
     @Transactional
     public void delete(Long id) {
+        Jwt jwt = currentJwt();
+        if (!isSupervisor(jwt)) {
+            Long userId = requireUserId(jwt);
+            if (!outfitRepository.existsByIdAndUserId(id, userId)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+            }
+        }
+
         if (!outfitRepository.existsById(id)) {
             throw new NotFoundException("Outfit not found with id: " + id);
         }
@@ -122,5 +170,34 @@ public class OutfitService {
             oi.setRole(link.role());
             oi.setPositionIndex(i + 1);
         }
+    }
+
+    private static Jwt currentJwt() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (!(auth instanceof JwtAuthenticationToken jwtAuth)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized");
+        }
+        return jwtAuth.getToken();
+    }
+
+    private static Long requireUserId(Jwt jwt) {
+        String userId = jwt.getClaimAsString("userId");
+        if (userId == null || userId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Missing userId claim");
+        }
+        try {
+            return Long.parseLong(userId);
+        } catch (NumberFormatException ex) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid userId claim");
+        }
+    }
+
+    private static boolean isSupervisor(Jwt jwt) {
+        Object roles = jwt.getClaims().get("roles");
+        if (roles instanceof java.util.Collection<?> c) {
+            return c.stream().anyMatch(r -> "ROLE_SUPERVISOR".equals(String.valueOf(r)) || "ROLE_ADMIN".equals(String.valueOf(r)));
+        }
+        String str = roles == null ? "" : roles.toString();
+        return str.contains("ROLE_SUPERVISOR") || str.contains("ROLE_ADMIN");
     }
 }

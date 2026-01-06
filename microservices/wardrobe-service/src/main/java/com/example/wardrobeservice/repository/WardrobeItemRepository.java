@@ -18,4 +18,12 @@ public interface WardrobeItemRepository extends ReactiveCrudRepository<WardrobeI
     Mono<Long> countAll();
 
     Flux<WardrobeItem> findAllByOwnerId(Long ownerId);
+
+    @Query("SELECT * FROM wardrobe_items WHERE owner_id = :ownerId ORDER BY id LIMIT :limit OFFSET :offset")
+    Flux<WardrobeItem> findAllByOwnerIdWithPagination(@Param("ownerId") Long ownerId,
+                                                      @Param("limit") int limit,
+                                                      @Param("offset") int offset);
+
+    @Query("SELECT COUNT(*) FROM wardrobe_items WHERE owner_id = :ownerId")
+    Mono<Long> countByOwnerId(@Param("ownerId") Long ownerId);
 }

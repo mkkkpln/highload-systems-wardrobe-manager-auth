@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @ActiveProfiles("test")
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
+@SuppressWarnings("resource")
 public class UserServiceIntegrationTest {
 
     @Container
@@ -46,15 +47,15 @@ public class UserServiceIntegrationTest {
     @Test
     void shouldCreateUser() {
         // Given
-        UserDto createDto = new UserDto("John Doe", "john@example.com");
+        UserDto createDto = new UserDto("john@example.com", "John Doe");
 
         // When
         UserResponseDto created = userService.create(createDto);
 
         // Then
 
-        assertThat(created.name()).isEqualTo("john@example.com");
-        assertThat(created.email()).isEqualTo("John Doe");
+        assertThat(created.name()).isEqualTo("John Doe");
+        assertThat(created.email()).isEqualTo("john@example.com");
     }
 
     @Test
@@ -130,7 +131,7 @@ public class UserServiceIntegrationTest {
         UserResponseDto user1 = userService.create(
                 new UserDto("user1@example.com", "User 1")
         );
-        UserResponseDto user2 = userService.create(
+        userService.create(
                 new UserDto( "user2@example.com", "User 2")
         );
 

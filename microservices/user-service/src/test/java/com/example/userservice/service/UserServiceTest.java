@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.List;
 import java.util.Optional;
@@ -19,7 +20,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,6 +30,9 @@ class UserServiceTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private PasswordEncoder passwordEncoder;
 
     @InjectMocks
     private UserService userService;
@@ -51,7 +54,6 @@ class UserServiceTest {
     void getAll_shouldReturnAllUsers() {
         // Given
         List<User> users = List.of(testUser);
-        List<UserResponseDto> userDtos = List.of(testUserDto);
 
         when(userRepository.findAll()).thenReturn(users);
         when(userMapper.toDto(any(User.class))).thenReturn(testUserDto);
@@ -117,6 +119,7 @@ class UserServiceTest {
 
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(userMapper.toEntity(createDto)).thenReturn(newUser);
+        when(passwordEncoder.encode(any(String.class))).thenReturn("$2y$10$dummyhashdummyhashdummyhashdummyhashdummyhashd");
         when(userRepository.save(any(User.class))).thenReturn(savedUser);
         when(userMapper.toDto(savedUser)).thenReturn(savedDto);
 

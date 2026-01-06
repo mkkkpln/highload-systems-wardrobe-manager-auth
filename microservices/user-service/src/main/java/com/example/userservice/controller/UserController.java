@@ -11,6 +11,7 @@ import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,6 +31,7 @@ public class UserController {
     })
     @GetMapping
     @Deprecated
+    @PreAuthorize("hasRole('SUPERVISOR')")
     public ResponseEntity<List<UserResponseDto>> getAll() {
         return ResponseEntity.ok(userService.getAll());
     }
@@ -44,6 +46,7 @@ public class UserController {
             @ApiResponse(responseCode = "400", description = "Некорректный ID")
     })
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('SUPERVISOR') or #id.toString() == authentication.token.claims['userId']")
     public ResponseEntity<UserResponseDto> getById(@PathVariable @Min(1) Long id) {
         return ResponseEntity.ok(userService.getById(id));
     }
@@ -57,12 +60,14 @@ public class UserController {
             @ApiResponse(responseCode = "400", description = "Некорректные данные в теле запроса")
     })
     @PostMapping
+    @PreAuthorize("hasRole('SUPERVISOR')")
     public ResponseEntity<UserResponseDto> create(@Valid @RequestBody UserDto userDto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.create(userDto));
     }
 
     @Operation(summary = "Обновить данные пользователя", description = "Изменяет данные пользователя по ID")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('SUPERVISOR') or #id.toString() == authentication.token.claims['userId']")
     public ResponseEntity<UserResponseDto> update(@PathVariable @Min(1) Long id,
                                           @Valid @RequestBody UserDto userDto) {
         return ResponseEntity.ok(userService.update(id, userDto));
@@ -70,6 +75,7 @@ public class UserController {
 
     @Operation(summary = "Удалить пользователя", description = "Удаляет пользователя по ID")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('SUPERVISOR') or #id.toString() == authentication.token.claims['userId']")
     public ResponseEntity<Void> delete(@PathVariable @Min(1) Long id) {
         userService.delete(id);
         return ResponseEntity.noContent().build();

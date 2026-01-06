@@ -63,3 +63,6 @@ management:
   health:
     circuitbreakers:
       enabled: true
+
+jwt:
+  ttl-seconds: 3600

@@ -14,6 +14,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -22,6 +25,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyLong;
 
 @SpringBootTest(classes = OutfitServiceApplication.class)
@@ -31,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.flyway.enabled=false"
 })
+@SuppressWarnings("resource")
 public class OutfitServiceIntegrationTest {
 
     @Container
@@ -52,10 +57,21 @@ public class OutfitServiceIntegrationTest {
         registry.add("spring.datasource.password", postgres::getPassword);
     }
 
+    private void asUser(long userId) {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .subject("user" + userId + "@example.com")
+                .claim("userId", String.valueOf(userId))
+                .claim("roles", List.of("ROLE_USER"))
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+    }
+
     @Test
     void shouldCreateOutfit() {
+        asUser(1L);
         // given
-        Mockito.when(userServiceClientWrapper.getUserById(anyLong()))
+        Mockito.when(userServiceClientWrapper.getUserById(anyString(), anyLong()))
                 .thenReturn(new UserDto(1L, "test@example.com", "Test User"));
 
         OutfitDto createDto = new OutfitDto(
@@ -79,8 +95,9 @@ public class OutfitServiceIntegrationTest {
 
     @Test
     void shouldGetOutfitById_whenExists() {
+        asUser(1L);
         // given
-        Mockito.when(userServiceClientWrapper.getUserById(anyLong()))
+        Mockito.when(userServiceClientWrapper.getUserById(anyString(), anyLong()))
                 .thenReturn(new UserDto(1L, "test@example.com", "Test User"));
 
         OutfitDto createDto = new OutfitDto(
@@ -101,16 +118,18 @@ public class OutfitServiceIntegrationTest {
 
     @Test
     void shouldThrowNotFoundException_whenOutfitDoesNotExist() {
+        asUser(1L);
         // when & then
         assertThatThrownBy(() -> outfitService.getById(999L))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Outfit not found");
+                .hasMessageContaining("Access denied");
     }
 
     @Test
     void shouldGetPagedOutfits() {
+        asUser(1L);
         // given - create some outfits
-        Mockito.when(userServiceClientWrapper.getUserById(anyLong()))
+        Mockito.when(userServiceClientWrapper.getUserById(anyString(), anyLong()))
                 .thenReturn(new UserDto(1L, "test@example.com", "Test User"));
 
         for (int i = 0; i < 5; i++) {
@@ -132,8 +151,9 @@ public class OutfitServiceIntegrationTest {
 
     @Test
     void shouldGetInfiniteScrollOutfits() {
+        asUser(1L);
         // given - create some outfits
-        Mockito.when(userServiceClientWrapper.getUserById(anyLong()))
+        Mockito.when(userServiceClientWrapper.getUserById(anyString(), anyLong()))
                 .thenReturn(new UserDto(1L, "test@example.com", "Test User"));
 
         for (int i = 0; i < 3; i++) {
@@ -154,8 +174,9 @@ public class OutfitServiceIntegrationTest {
 
     @Test
     void shouldUpdateOutfit() {
+        asUser(1L);
         // given
-        Mockito.when(userServiceClientWrapper.getUserById(anyLong()))
+        Mockito.when(userServiceClientWrapper.getUserById(anyString(), anyLong()))
                 .thenReturn(new UserDto(1L, "test@example.com", "Test User"));
 
         OutfitDto createDto = new OutfitDto(
@@ -185,8 +206,9 @@ public class OutfitServiceIntegrationTest {
 
     @Test
     void shouldDeleteOutfit() {
+        asUser(1L);
         // given
-        Mockito.when(userServiceClientWrapper.getUserById(anyLong()))
+        Mockito.when(userServiceClientWrapper.getUserById(anyString(), anyLong()))
                 .thenReturn(new UserDto(1L, "test@example.com", "Test User"));
 
         OutfitDto createDto = new OutfitDto(

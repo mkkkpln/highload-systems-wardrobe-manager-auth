@@ -1,21 +1,16 @@
 package com.example.wardrobeservice.controller;
 
-import com.example.wardrobeservice.dto.WardrobeItemDto;
 import com.example.wardrobeservice.dto.WardrobeItemResponseDto;
 import com.example.wardrobeservice.entity.enums.ItemType;
 import com.example.wardrobeservice.entity.enums.Season;
-import com.example.wardrobeservice.exception.GlobalExceptionHandler;
 import com.example.wardrobeservice.service.PagedResult;
 import com.example.wardrobeservice.service.WardrobeItemService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.data.r2dbc.R2dbcDataAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.r2dbc.R2dbcRepositoriesAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
-import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
@@ -26,9 +21,11 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockJwt;
 
 @SpringBootTest
 @AutoConfigureWebTestClient
+@ActiveProfiles("test")
 class WardrobeItemControllerTest {
 
     @Autowired
@@ -51,7 +48,8 @@ class WardrobeItemControllerTest {
 
         when(itemService.getById(1L)).thenReturn(Mono.just(dto));
 
-        webTestClient.get().uri("/items/1")
+        webTestClient.mutateWith(mockJwt())
+                .get().uri("/items/1")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -64,7 +62,8 @@ class WardrobeItemControllerTest {
     void getById_shouldReturn404_whenNotFound() {
         when(itemService.getById(999L)).thenReturn(Mono.empty());
 
-        webTestClient.get().uri("/items/999")
+        webTestClient.mutateWith(mockJwt())
+                .get().uri("/items/999")
                 .exchange()
                 .expectStatus().isNotFound();
     }
@@ -76,7 +75,8 @@ class WardrobeItemControllerTest {
         );
         when(itemService.getItemsUpTo50(0, 10)).thenReturn(Mono.just(new PagedResult<>(List.of(dto), 123)));
 
-        webTestClient.get().uri("/items/paged?page=0&size=10")
+        webTestClient.mutateWith(mockJwt())
+                .get().uri("/items/paged?page=0&size=10")
                 .exchange()
                 .expectStatus().isOk()
                 .expectHeader().valueEquals("X-Total-Count", "123")
@@ -91,7 +91,8 @@ class WardrobeItemControllerTest {
         );
         when(itemService.getInfiniteScroll(0, 10)).thenReturn(Flux.just(dto));
 
-        webTestClient.get().uri("/items/scroll?offset=0&limit=10")
+        webTestClient.mutateWith(mockJwt())
+                .get().uri("/items/scroll?offset=0&limit=10")
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -105,7 +106,8 @@ class WardrobeItemControllerTest {
         );
         when(itemService.create(any())).thenReturn(Mono.just(created));
 
-        webTestClient.post().uri("/items")
+        webTestClient.mutateWith(mockJwt())
+                .post().uri("/items")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
                         {
@@ -127,7 +129,8 @@ class WardrobeItemControllerTest {
     void create_shouldReturn400_whenInvalidBody() {
         when(itemService.create(any())).thenReturn(Mono.empty());
 
-        webTestClient.post().uri("/items")
+        webTestClient.mutateWith(mockJwt())
+                .post().uri("/items")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
                         {
@@ -147,7 +150,8 @@ class WardrobeItemControllerTest {
         );
         when(itemService.update(eq(1L), any())).thenReturn(Mono.just(updated));
 
-        webTestClient.put().uri("/items/1")
+        webTestClient.mutateWith(mockJwt())
+                .put().uri("/items/1")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
                         {
@@ -170,7 +174,8 @@ class WardrobeItemControllerTest {
     void delete_shouldReturn204() {
         when(itemService.delete(1L)).thenReturn(Mono.empty());
 
-        webTestClient.delete().uri("/items/1")
+        webTestClient.mutateWith(mockJwt())
+                .delete().uri("/items/1")
                 .exchange()
                 .expectStatus().isNoContent();
     }

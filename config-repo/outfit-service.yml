@@ -5,6 +5,11 @@ spring:
   application:
     name: outfit-service
 
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+
   datasource:
     url: jdbc:postgresql://postgres-outfit:5432/outfits_db
     username: wardrobe

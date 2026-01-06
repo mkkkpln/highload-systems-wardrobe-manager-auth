@@ -24,11 +24,11 @@ public class UserServiceClientWrapper {
             name = "user-service",
             fallbackMethod = "getUserByIdFallback"
     )
-    public UserDto getUserById(Long id) {
-        return client.getUserById(id);
+    public UserDto getUserById(String authorization, Long id) {
+        return client.getUserById(authorization, id);
     }
 
-    public UserDto getUserByIdFallback(Long id, Throwable ex) {
+    public UserDto getUserByIdFallback(String authorization, Long id, Throwable ex) {
         // 404 от user-service - это бизнес-ошибка (пользователь не найден), не 503.
         if (ex instanceof FeignException.NotFound) {
             throw new ResponseStatusException(
@@ -36,6 +36,14 @@ public class UserServiceClientWrapper {
                     "User not found with id: " + id,
                     ex
             );
+        }
+
+        // 401/403 от user-service - это не "недоступность", а ожидаемая авторизация/доступ.
+        if (ex instanceof FeignException.Unauthorized) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized", ex);
+        }
+        if (ex instanceof FeignException.Forbidden) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden", ex);
         }
 
         var cb = circuitBreakerRegistry.circuitBreaker("user-service");
