@@ -100,6 +100,18 @@ class UserControllerMvcTest {
     }
 
     @Test
+    void getById_shouldAllowModerator_forOtherUser() throws Exception {
+        when(userService.getById(11L)).thenReturn(new UserResponseDto(11L, "x@x", "X"));
+
+        mockMvc.perform(get("/users/11").with(jwt()
+                        .authorities(new SimpleGrantedAuthority("ROLE_MODERATOR"))
+                        .jwt(j -> j.claim("userId", "102").subject("moderator@example.com"))
+                ))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(11));
+    }
+
+    @Test
     void create_shouldReturn201_forSupervisor() throws Exception {
         when(userService.create(any(UserDto.class))).thenReturn(new UserResponseDto(5L, "n@n", "N"));
 

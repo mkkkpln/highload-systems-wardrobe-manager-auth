@@ -6,7 +6,10 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
-@FeignClient(name = "user-service")
+@FeignClient(
+        name = "user-service",
+        url = "${clients.user-service.base-url:http://user-service:8081}"
+)
 public interface UserServiceClient {
 
     @GetMapping("/users/{id}")

@@ -90,6 +90,16 @@ class OutfitServiceTest {
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
     }
 
+    private void asModerator() {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .subject("moderator@example.com")
+                .claim("userId", "998")
+                .claim("roles", List.of("ROLE_MODERATOR"))
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+    }
+
     @Test
     void getOutfitsUpTo50_shouldReturnPagedResult() {
         asSupervisor();
@@ -139,10 +149,8 @@ class OutfitServiceTest {
         // Given
         int offset = 0;
         int limit = 10;
-        Pageable pageable = PageRequest.of(0, 10);
-        Page<Outfit> outfitPage = new PageImpl<>(List.of(testOutfit), pageable, 1);
 
-        when(outfitRepository.findAll(pageable)).thenReturn(outfitPage);
+        when(outfitRepository.findAllScrollFromId(0, 10)).thenReturn(List.of(testOutfit));
         when(outfitMapper.toDto(testOutfit)).thenReturn(testOutfitDto);
 
         // When
@@ -152,7 +160,7 @@ class OutfitServiceTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0)).isEqualTo(testOutfitDto);
 
-        verify(outfitRepository).findAll(pageable);
+        verify(outfitRepository).findAllScrollFromId(0, 10);
         verify(outfitMapper).toDto(testOutfit);
     }
 
@@ -162,17 +170,15 @@ class OutfitServiceTest {
         // Given
         int offset = 0;
         int limit = 100;
-        Pageable pageable = PageRequest.of(0, 50);
-        Page<Outfit> outfitPage = new PageImpl<>(List.of(testOutfit), pageable, 1);
 
-        when(outfitRepository.findAll(pageable)).thenReturn(outfitPage);
+        when(outfitRepository.findAllScrollFromId(0, 50)).thenReturn(List.of(testOutfit));
         when(outfitMapper.toDto(testOutfit)).thenReturn(testOutfitDto);
 
         // When
         outfitService.getInfiniteScroll(offset, limit);
 
         // Then
-        verify(outfitRepository).findAll(PageRequest.of(0, 50));
+        verify(outfitRepository).findAllScrollFromId(0, 50);
     }
 
     @Test
@@ -259,6 +265,21 @@ class OutfitServiceTest {
     @Test
     void create_shouldAllowSupervisorToCreateForAnyUser() {
         asSupervisor();
+        OutfitDto createDto = new OutfitDto("New Outfit", 123L, List.of());
+
+        when(userServiceClientWrapper.getUserById(eq("Bearer test-token"), eq(123L)))
+                .thenReturn(new com.example.outfitservice.dto.UserDto(123L, "x@x", "X"));
+        when(outfitMapper.toEntity(createDto)).thenReturn(new Outfit());
+        when(outfitRepository.save(any(Outfit.class))).thenReturn(testOutfit);
+        when(outfitMapper.toDto(testOutfit)).thenReturn(testOutfitDto);
+
+        OutfitResponseDto result = outfitService.create(createDto);
+        assertThat(result).isEqualTo(testOutfitDto);
+    }
+
+    @Test
+    void create_shouldAllowModeratorToCreateForAnyUser() {
+        asModerator();
         OutfitDto createDto = new OutfitDto("New Outfit", 123L, List.of());
 
         when(userServiceClientWrapper.getUserById(eq("Bearer test-token"), eq(123L)))

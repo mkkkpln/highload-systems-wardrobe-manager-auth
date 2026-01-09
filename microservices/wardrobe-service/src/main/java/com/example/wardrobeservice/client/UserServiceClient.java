@@ -17,7 +17,7 @@ public class UserServiceClient {
 
     public UserServiceClient(
             WebClient.Builder webClientBuilder,
-            @Value("${clients.user-service.base-url:http://user-service}") String baseUrl
+            @Value("${clients.user-service.base-url:http://user-service:8081}") String baseUrl
     ) {
         this.webClient = webClientBuilder
                 .baseUrl(baseUrl)

@@ -84,6 +84,17 @@ class AuthControllerMvcTest {
     }
 
     @Test
+    @WithMockUser(roles = "MODERATOR")
+    void register_shouldReturn403_whenModerator() throws Exception {
+        mockMvc.perform(post("/users/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"x@example.com","name":"Xx","password":"password","role":"ROLE_USER"}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     @WithMockUser(roles = "SUPERVISOR")
     void register_shouldReturn201_whenSupervisor() throws Exception {
         User created = new User();

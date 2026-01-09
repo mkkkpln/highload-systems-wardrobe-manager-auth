@@ -1,6 +1,7 @@
 package com.example.outfitservice.controller;
 
 import com.example.outfitservice.dto.OutfitDto;
+import com.example.outfitservice.dto.OutfitDetailedResponseDto;
 import com.example.outfitservice.dto.OutfitResponseDto;
 import com.example.outfitservice.service.OutfitService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,7 +33,13 @@ public class OutfitController {
     })
     @GetMapping("/{id}")
     public ResponseEntity<OutfitResponseDto> getById(@PathVariable @Min(1) Long id) {
-        return ResponseEntity.ok(outfitService.getById(id));
+        return ResponseEntity.ok(outfitService.getByIdWithItemDetails(id));
+    }
+
+    @Operation(summary = "Получить образ по ID (с деталями вещей)", description = "Возвращает образ и подробное описание каждой вещи через wardrobe-service")
+    @GetMapping("/{id}/detailed")
+    public ResponseEntity<OutfitDetailedResponseDto> getByIdDetailed(@PathVariable @Min(1) Long id) {
+        return ResponseEntity.ok(outfitService.getDetailedById(id));
     }
 
     @Operation(summary = "Создать новый образ", description = "Создает новый образ на основе переданных данных")
@@ -56,6 +63,13 @@ public class OutfitController {
         return ResponseEntity.ok(outfitService.update(id, dto));
     }
 
+    @Operation(summary = "Обновить существующий образ (с деталями вещей)", description = "Обновляет образ и возвращает ответ с деталями вещей")
+    @PutMapping("/{id}/detailed")
+    public ResponseEntity<OutfitDetailedResponseDto> updateDetailed(@PathVariable @Min(1) Long id,
+                                                                    @Valid @RequestBody OutfitDto dto) {
+        return ResponseEntity.ok(outfitService.updateDetailed(id, dto));
+    }
+
     @Operation(summary = "Получить образы с пагинацией",
             description = "Возвращает список образов постранично (не более 50 за запрос). В заголовке ответа указывается общее количество записей.")
     @ApiResponses({
@@ -70,6 +84,18 @@ public class OutfitController {
                 .ok()
                 .header("X-Total-Count", String.valueOf(result.totalCount()))
                 .body(result.items());
+    }
+
+    @Operation(summary = "Получить все мои образы", description = "Возвращает все образы текущего пользователя (даже если роль supervisor/moderator)")
+    @GetMapping("/me")
+    public ResponseEntity<List<OutfitResponseDto>> getMyOutfits() {
+        return ResponseEntity.ok(outfitService.getMyOutfits());
+    }
+
+    @Operation(summary = "Получить все мои образы (с деталями вещей)", description = "Возвращает все образы текущего пользователя с подробными данными по вещам")
+    @GetMapping("/me/detailed")
+    public ResponseEntity<List<OutfitDetailedResponseDto>> getMyOutfitsDetailed() {
+        return ResponseEntity.ok(outfitService.getMyOutfitsDetailed());
     }
 
     @Operation(summary = "Бесконечная прокрутка образов",

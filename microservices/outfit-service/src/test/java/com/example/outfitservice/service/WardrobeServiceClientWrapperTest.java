@@ -59,8 +59,9 @@ class WardrobeServiceClientWrapperTest {
     @Test
     void getItemById_shouldReturnItem() {
         // Given
+        String authorization = "Bearer test-token";
         Long itemId = 1L;
-        when(wardrobeServiceClient.getItemById(itemId)).thenReturn(testItem);
+        when(wardrobeServiceClient.getItemById(authorization, itemId)).thenReturn(testItem);
         when(circuitBreaker.run(any(), any())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
             Supplier<WardrobeItemDto> supplier = (Supplier<WardrobeItemDto>) inv.getArgument(0);
@@ -68,17 +69,18 @@ class WardrobeServiceClientWrapperTest {
         });
 
         // When
-        WardrobeItemDto result = wardrobeServiceClientWrapper.getItemById(itemId);
+        WardrobeItemDto result = wardrobeServiceClientWrapper.getItemById(authorization, itemId);
 
         // Then
         assertThat(result).isEqualTo(testItem);
-        verify(wardrobeServiceClient).getItemById(itemId);
+        verify(wardrobeServiceClient).getItemById(authorization, itemId);
         verify(circuitBreaker).run(any(), any());
     }
 
     @Test
     void getItemById_shouldThrowServiceUnavailable_whenCircuitBreakerOpens() {
         // Given
+        String authorization = "Bearer test-token";
         Long itemId = 1L;
         when(circuitBreaker.run(any(), any())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
@@ -87,12 +89,12 @@ class WardrobeServiceClientWrapperTest {
         });
 
         // When & Then
-        assertThatThrownBy(() -> wardrobeServiceClientWrapper.getItemById(itemId))
+        assertThatThrownBy(() -> wardrobeServiceClientWrapper.getItemById(authorization, itemId))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasFieldOrPropertyWithValue("status", HttpStatus.SERVICE_UNAVAILABLE)
                 .hasMessageContaining("Wardrobe-service unavailable");
 
         verify(circuitBreaker).run(any(), any());
-        verify(wardrobeServiceClient, never()).getItemById(eq(itemId));
+        verify(wardrobeServiceClient, never()).getItemById(eq(authorization), eq(itemId));
     }
 }

@@ -46,6 +46,14 @@ public class UserServiceClientWrapper {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Forbidden", ex);
         }
 
+        // Любые другие 4xx (например 400/409) — тоже не "недоступность".
+        if (ex instanceof FeignException fe) {
+            HttpStatus status = HttpStatus.resolve(fe.status());
+            if (status != null && status.is4xxClientError()) {
+                throw new ResponseStatusException(status, "User-service returned " + fe.status(), fe);
+            }
+        }
+
         var cb = circuitBreakerRegistry.circuitBreaker("user-service");
         var state = cb.getState().name();
         log.warn("User-service call failed. circuitBreaker=user-service state={} userId={} ex={}",

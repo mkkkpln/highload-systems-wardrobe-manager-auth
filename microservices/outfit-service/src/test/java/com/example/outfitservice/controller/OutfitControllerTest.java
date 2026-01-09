@@ -2,7 +2,12 @@ package com.example.outfitservice.controller;
 
 import com.example.outfitservice.dto.OutfitItemLinkDto;
 import com.example.outfitservice.dto.OutfitResponseDto;
+import com.example.outfitservice.dto.OutfitDetailedResponseDto;
+import com.example.outfitservice.dto.OutfitItemDetailedDto;
+import com.example.outfitservice.dto.WardrobeItemDto;
 import com.example.outfitservice.entity.OutfitRole;
+import com.example.outfitservice.entity.enums.ItemType;
+import com.example.outfitservice.entity.enums.Season;
 import com.example.outfitservice.exception.GlobalExceptionHandler;
 import com.example.outfitservice.exception.NotFoundException;
 import com.example.outfitservice.service.OutfitService;
@@ -49,7 +54,7 @@ class OutfitControllerTest {
                 List.of(new OutfitItemLinkDto(1L, OutfitRole.TOP))
         );
 
-        when(outfitService.getById(1L)).thenReturn(dto);
+        when(outfitService.getByIdWithItemDetails(1L)).thenReturn(dto);
 
         mockMvc.perform(get("/outfits/1").with(jwt()))
                 .andExpect(status().isOk())
@@ -61,8 +66,39 @@ class OutfitControllerTest {
     }
 
     @Test
+    void getByIdDetailed_shouldReturn200_whenFound() throws Exception {
+        WardrobeItemDto item = new WardrobeItemDto(
+                101L,
+                ItemType.SHIRT,
+                "Nike",
+                "Blue",
+                Season.SUMMER,
+                "img.jpg",
+                10L
+        );
+        OutfitDetailedResponseDto dto = new OutfitDetailedResponseDto(
+                1L,
+                "Detailed Outfit",
+                10L,
+                List.of(new OutfitItemDetailedDto(101L, OutfitRole.TOP, item))
+        );
+
+        when(outfitService.getDetailedById(1L)).thenReturn(dto);
+
+        mockMvc.perform(get("/outfits/1/detailed").with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.title").value("Detailed Outfit"))
+                .andExpect(jsonPath("$.user_id").value(10))
+                .andExpect(jsonPath("$.items[0].item_id").value(101))
+                .andExpect(jsonPath("$.items[0].role").value("TOP"))
+                .andExpect(jsonPath("$.items[0].item.type").value("SHIRT"))
+                .andExpect(jsonPath("$.items[0].item.brand").value("Nike"));
+    }
+
+    @Test
     void getById_shouldReturn404_whenNotFound() throws Exception {
-        when(outfitService.getById(999L)).thenThrow(new NotFoundException("Outfit not found with id: 999"));
+        when(outfitService.getByIdWithItemDetails(999L)).thenThrow(new NotFoundException("Outfit not found with id: 999"));
 
         mockMvc.perform(get("/outfits/999").with(jwt()))
                 .andExpect(status().isNotFound());
@@ -149,6 +185,16 @@ class OutfitControllerTest {
 
         mockMvc.perform(delete("/outfits/1").with(jwt()))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void getMyOutfits_shouldReturn200() throws Exception {
+        OutfitResponseDto dto = new OutfitResponseDto(1L, "Outfit", 10L, List.of());
+        when(outfitService.getMyOutfits()).thenReturn(List.of(dto));
+
+        mockMvc.perform(get("/outfits/me").with(jwt()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(1));
     }
 }
 

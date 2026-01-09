@@ -6,17 +6,16 @@ import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import jakarta.validation.constraints.NotNull;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record OutfitItemLinkDto(
+public record OutfitItemDetailedDto(
         @NotNull
         Long itemId,
 
         @NotNull
         OutfitRole role,
 
-        // Optional, present in responses when expanded with wardrobe item details
+        @NotNull
         WardrobeItemDto item
 ) {
-    public OutfitItemLinkDto(Long itemId, OutfitRole role) {
-        this(itemId, role, null);
-    }
 }
+
+

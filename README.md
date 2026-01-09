@@ -308,24 +308,241 @@ docker-compose down
 ### Проверка работоспособности
 
 ```bash
-# Создать пользователя (через Gateway)
-curl -X POST http://localhost:8080/users \
+# 1) Логин под seed-пользователями (пароль везде: 'password')
+# supervisor@example.com -> ROLE_SUPERVISOR
+# moderator@example.com  -> ROLE_MODERATOR
+SUP_TOKEN=$(curl -s -X POST http://localhost:8080/users/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","name":"Test User"}'
+  -d '{"email":"supervisor@example.com","password":"password"}' | jq -r '.access_token')
 
-# Создать предмет гардероба (через Gateway)
-curl -X POST http://localhost:8080/items \
+MOD_TOKEN=$(curl -s -X POST http://localhost:8080/users/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"ownerId":1,"type":"SHIRT","brand":"Nike","color":"Blue","season":"SUMMER","imageUrl":"test.jpg"}'
+  -d '{"email":"moderator@example.com","password":"password"}' | jq -r '.access_token')
 
-# Создать образ (через Gateway)
-curl -X POST http://localhost:8080/outfits \
+# 2) Создать обычного пользователя может только SUPERVISOR (MODERATOR должен получить 403)
+curl -i -X POST http://localhost:8080/users/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"title":"Summer Outfit","userId":1,"items":[{"itemId":1,"role":"TOP","positionIndex":0}]}'
+  -H "Authorization: Bearer $SUP_TOKEN" \
+  -d '{"email":"u1@example.com","name":"U1","password":"password","role":"ROLE_USER"}'
+
+curl -i -X POST http://localhost:8080/users/auth/register \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MOD_TOKEN" \
+  -d '{"email":"u2@example.com","name":"U2","password":"password","role":"ROLE_USER"}'
+
+# 3) Проверка прав на вещи (wardrobe-service): MODERATOR не может создавать вещи за другого пользователя
+curl -i -X POST http://localhost:8080/items \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MOD_TOKEN" \
+  -d '{"ownerId":999,"type":"SHIRT","brand":"Nike","color":"Blue","season":"SUMMER","imageUrl":"test.jpg"}'
+
+# 4) Проверка прав на аутфиты (outfit-service): MODERATOR может создавать аутфиты для другого пользователя
+curl -i -X POST http://localhost:8080/outfits \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MOD_TOKEN" \
+  -d '{"title":"Moderator Outfit","user_id":1,"items":[]}'
 
 # Проверить статус Circuit Breaker
 curl http://localhost:8082/actuator/health | jq '.components.circuitBreakers'
 ```
+
+## Роли и матрица прав
+
+В системе используется claim `roles` в JWT (например: `ROLE_USER`, `ROLE_SUPERVISOR`, `ROLE_MODERATOR`).
+
+- **ROLE_USER**: управляет только своими вещами и своими аутфитами.
+- **ROLE_MODERATOR**: не может регистрировать пользователей и не может менять вещи других пользователей, но может создавать/изменять/удалять аутфиты пользователей.
+- **ROLE_SUPERVISOR**: расширенные права (в т.ч. регистрация пользователей), доступ к данным пользователей шире обычного пользователя.
+
+## Проверка ролей через Swagger (3 роли)
+
+Ниже — инструкция проверки различий между **ROLE_USER**, **ROLE_MODERATOR**, **ROLE_SUPERVISOR** через Swagger UI (агрегированная страница на Gateway).
+
+### Кратко: кому что доступно
+
+- **Регистрация пользователей** (`POST /users/auth/register`)
+  - **ROLE_SUPERVISOR**: ✅ можно
+  - **ROLE_MODERATOR**: ❌ нельзя (403)
+  - **ROLE_USER**: ❌ нельзя (403)
+
+- **Вещи** (`/items`, Wardrobe Service)
+  - **ROLE_USER**: ✅ CRUD только **свои** вещи (owner_id == user_id), ❌ чужие (403)
+  - **ROLE_MODERATOR**: ✅ CRUD только **свои** вещи, ❌ чужие (403)
+  - **ROLE_SUPERVISOR**: ✅ может работать с **любыми** вещами (любой owner_id)
+
+- **Аутфиты** (`/outfits`, Outfit Service)
+  - **ROLE_USER**: ✅ CRUD только **свои** аутфиты (user_id == user_id), ❌ чужие (403)
+  - **ROLE_MODERATOR**: ✅ может CRUD **любые** аутфиты (в т.ч. чужие)
+  - **ROLE_SUPERVISOR**: ✅ может CRUD **любые** аутфиты (в т.ч. чужие)
+
+### 0) Подготовка: получить 3 токена и 3 userId
+
+Перейди в Swagger UI на Gateway: `http://localhost:8080/swagger-ui/index.html`
+
+#### 0.1 Логин супервайзера
+User Service → **POST** `/users/auth/login` (Try it out)
+Body:
+`{ "email": "supervisor@example.com", "password": "password" }`
+Execute → скопируй `access_token` → **SUP_TOKEN**.
+
+#### 0.2 Авторизоваться супервайзером
+Нажми **Authorize** → вставь:
+`Bearer <SUP_TOKEN>`
+Authorize → Close.
+
+#### 0.3 Узнать SUP_ID
+User Service → **GET** `/users/auth/me` → Execute
+Запомни `user_id` → **SUP_ID**.
+
+#### 0.4 Логин модератора
+User Service → **POST** `/users/auth/login`
+Body:
+`{ "email": "moderator@example.com", "password": "password" }`
+Execute → скопируй `access_token` → **MOD_TOKEN**.
+
+#### 0.5 Авторизоваться модератором
+Authorize → вставь:
+`Bearer <MOD_TOKEN>`
+Authorize → Close.
+
+#### 0.6 Узнать MOD_ID
+User Service → **GET** `/users/auth/me` → Execute
+Запомни `user_id` → **MOD_ID**.
+
+#### 0.7 Создать обычного пользователя (если ещё нет)
+Authorize должен стоять на **SUP_TOKEN**.
+User Service → **POST** `/users/auth/register`
+Body:
+`{ "email": "u-check@example.com", "name": "User Check", "password": "password", "role": "ROLE_USER" }`
+Execute → ожидай **201**.
+
+*(доп. проверка)* Попробуй то же самое с **MOD_TOKEN** → ожидай **403**.
+
+#### 0.8 Логин обычного пользователя
+User Service → **POST** `/users/auth/login`
+Body:
+`{ "email": "u-check@example.com", "password": "password" }`
+Execute → скопируй `access_token` → **USER_TOKEN**.
+
+#### 0.9 Авторизоваться обычным пользователем
+Authorize → вставь:
+`Bearer <USER_TOKEN>`
+Authorize → Close.
+
+#### 0.10 Узнать USER_ID
+User Service → **GET** `/users/auth/me` → Execute
+Запомни `user_id` → **USER_ID**.
+
+---
+
+### 1) Проверка Wardrobe `/items`
+
+Переключись вверху Swagger на **Wardrobe Service**.
+
+#### 1.1 ROLE_USER: создать вещь себе → 201
+Authorize = **USER_TOKEN**.
+**POST** `/items`
+Body:
+`{ "type":"SHIRT","brand":"Nike","color":"Blue","season":"SUMMER","image_url":"img.jpg","owner_id": <USER_ID> }`
+Execute → ожидай **201**.
+Запомни `id` → **ITEM_ID_USER**.
+
+#### 1.2 ROLE_USER: попытка создать вещь “чужому” → 403
+Authorize = **USER_TOKEN**.
+**POST** `/items`
+Body:
+`{ "type":"SHIRT","brand":"Nike","color":"Blue","season":"SUMMER","image_url":"img.jpg","owner_id": <SUP_ID> }`
+Execute → ожидай **403**.
+
+#### 1.3 ROLE_MODERATOR: создать вещь себе → 201
+Authorize = **MOD_TOKEN**.
+**POST** `/items`
+Body:
+`{ "type":"HAT","brand":"Puma","color":"Gray","season":"SUMMER","image_url":"img3.jpg","owner_id": <MOD_ID> }`
+Execute → ожидай **201**.
+Запомни `id` → **ITEM_ID_MOD**.
+
+#### 1.4 ROLE_MODERATOR: попытка создать вещь “чужому” → 403
+Authorize = **MOD_TOKEN**.
+**POST** `/items`
+Body:
+`{ "type":"HAT","brand":"Puma","color":"Gray","season":"SUMMER","image_url":"img3.jpg","owner_id": <USER_ID> }`
+Execute → ожидай **403**.
+
+#### 1.5 ROLE_SUPERVISOR: создать вещь любому owner_id → 201
+Authorize = **SUP_TOKEN**.
+**POST** `/items`
+Body:
+`{ "type":"JACKET","brand":"Adidas","color":"Black","season":"WINTER","image_url":"img2.jpg","owner_id": <SUP_ID> }`
+Execute → ожидай **201**.
+Запомни `id` → **ITEM_ID_SUP**.
+
+#### 1.6 ROLE_USER: попытка получить чужую вещь → 403
+Authorize = **USER_TOKEN**.
+**GET** `/items/{id}` → подставь **ITEM_ID_SUP** → Execute
+Ожидай **403**.
+
+#### 1.7 ROLE_MODERATOR: попытка получить чужую вещь → 403
+Authorize = **MOD_TOKEN**.
+**GET** `/items/{id}` → подставь **ITEM_ID_USER** → Execute
+Ожидай **403**.
+
+#### 1.8 ROLE_SUPERVISOR: получить любую вещь → 200
+Authorize = **SUP_TOKEN**.
+**GET** `/items/{id}` → подставь **ITEM_ID_USER** (или **ITEM_ID_MOD**) → Execute
+Ожидай **200**.
+
+---
+
+### 2) Проверка Outfit `/outfits`
+
+Переключись вверху Swagger на **Outfit Service**.
+
+#### 2.1 ROLE_USER: создать outfit себе → 201
+Authorize = **USER_TOKEN**.
+**POST** `/outfits`
+Body:
+`{ "title":"My outfit","user_id": <USER_ID>, "items":[] }`
+Execute → **201**.
+Запомни `id` → **OUTFIT_ID_USER**.
+
+#### 2.2 ROLE_USER: попытка создать outfit “чужому” → 403
+Authorize = **USER_TOKEN**.
+**POST** `/outfits`
+Body:
+`{ "title":"Foreign outfit","user_id": <SUP_ID>, "items":[] }`
+Execute → **403**.
+
+#### 2.3 ROLE_MODERATOR: создать outfit любому → 201
+Authorize = **MOD_TOKEN**.
+**POST** `/outfits`
+Body:
+`{ "title":"Moderator outfit","user_id": <USER_ID>, "items":[] }`
+Execute → **201**.
+Запомни `id` → **OUTFIT_ID_MOD**.
+
+#### 2.4 ROLE_SUPERVISOR: создать outfit любому → 201
+Authorize = **SUP_TOKEN**.
+**POST** `/outfits`
+Body:
+`{ "title":"Supervisor outfit","user_id": <SUP_ID>, "items":[] }`
+Execute → **201**.
+Запомни `id` → **OUTFIT_ID_SUP**.
+
+#### 2.5 ROLE_USER: попытка получить чужой outfit → 403
+Authorize = **USER_TOKEN**.
+**GET** `/outfits/{id}` → подставь **OUTFIT_ID_SUP** → Execute
+Ожидай **403**.
+
+#### 2.6 ROLE_MODERATOR: получить чужой outfit → 200
+Authorize = **MOD_TOKEN**.
+**GET** `/outfits/{id}` → подставь **OUTFIT_ID_USER** (или **OUTFIT_ID_SUP**) → Execute
+Ожидай **200**.
+
+#### 2.7 ROLE_SUPERVISOR: получить любой outfit → 200
+Authorize = **SUP_TOKEN**.
+**GET** `/outfits/{id}` → подставь **OUTFIT_ID_USER** (или **OUTFIT_ID_MOD**) → Execute
+Ожидай **200**.
 
 ## Архитектура базы данных
 

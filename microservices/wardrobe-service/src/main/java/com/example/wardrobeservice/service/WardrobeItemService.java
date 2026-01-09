@@ -16,7 +16,6 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
 import java.util.Collection;
 
 @Service
@@ -86,7 +85,6 @@ public class WardrobeItemService {
             return userServiceClientWrapper.getUserById(dto.ownerId())
                     .flatMap(user -> {
                         WardrobeItem item = itemMapper.toEntity(dto);
-                        item.setCreatedAt(Instant.now());
                         return itemRepository.save(item).map(itemMapper::toDto);
                     });
         });
@@ -164,7 +162,10 @@ public class WardrobeItemService {
     private static boolean isSupervisor(Jwt jwt) {
         Object roles = jwt.getClaims().get("roles");
         if (roles instanceof Collection<?> c) {
-            return c.stream().anyMatch(r -> "ROLE_SUPERVISOR".equals(String.valueOf(r)) || "ROLE_ADMIN".equals(String.valueOf(r)));
+            return c.stream().anyMatch(r ->
+                    "ROLE_SUPERVISOR".equals(String.valueOf(r))
+                            || "ROLE_ADMIN".equals(String.valueOf(r))
+            );
         }
         String str = roles == null ? "" : roles.toString();
         return str.contains("ROLE_SUPERVISOR") || str.contains("ROLE_ADMIN");

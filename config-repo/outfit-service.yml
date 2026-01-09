@@ -9,6 +9,12 @@ spring:
     openfeign:
       circuitbreaker:
         enabled: true
+      client:
+        config:
+          user-service:
+            url: ${clients.user-service.base-url:http://user-service:8081}
+          wardrobe-service:
+            url: ${clients.wardrobe-service.base-url:http://wardrobe-service:8082}
 
   datasource:
     url: jdbc:postgresql://postgres-outfit:5432/outfits_db
@@ -18,6 +24,12 @@ spring:
 
   liquibase:
     change-log: classpath:/db/migration/db.changelog-master.yaml
+
+clients:
+  user-service:
+    base-url: ${USER_SERVICE_URL:http://user-service:8081}
+  wardrobe-service:
+    base-url: ${WARDROBE_SERVICE_URL:http://wardrobe-service:8082}
 
 springdoc:
   api-docs:
@@ -51,6 +63,7 @@ resilience4j:
           - java.util.concurrent.TimeoutException
         ignoreExceptions:
           - feign.FeignException$NotFound
+          - feign.FeignException$Forbidden
     instances:
       user-service:
         slidingWindowSize: 5

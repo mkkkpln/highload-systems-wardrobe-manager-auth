@@ -46,7 +46,7 @@ public class UserController {
             @ApiResponse(responseCode = "400", description = "Некорректный ID")
     })
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('SUPERVISOR') or #id.toString() == authentication.token.claims['userId']")
+    @PreAuthorize("hasRole('SUPERVISOR') or hasRole('MODERATOR') or #id.toString() == authentication.token.claims['userId']")
     public ResponseEntity<UserResponseDto> getById(@PathVariable @Min(1) Long id) {
         return ResponseEntity.ok(userService.getById(id));
     }

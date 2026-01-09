@@ -1,7 +1,10 @@
 package com.example.outfitservice.service;
 
 import com.example.outfitservice.dto.OutfitDto;
+import com.example.outfitservice.dto.OutfitDetailedResponseDto;
 import com.example.outfitservice.dto.OutfitResponseDto;
+import com.example.outfitservice.dto.OutfitItemDetailedDto;
+import com.example.outfitservice.dto.OutfitItemLinkDto;
 import com.example.outfitservice.entity.Outfit;
 import com.example.outfitservice.entity.OutfitItem;
 import com.example.outfitservice.exception.NotFoundException;
@@ -34,6 +37,7 @@ public class OutfitService {
     private final OutfitRepository outfitRepository;
     private final OutfitMapper outfitMapper;
     private final UserServiceClientWrapper userServiceClientWrapper;
+    private final WardrobeServiceClientWrapper wardrobeServiceClientWrapper;
 
     public PagedResult<OutfitResponseDto> getOutfitsUpTo50(int page, int size) {
         Pageable pageable = PageRequest.of(page, Math.min(size, 50));
@@ -50,16 +54,15 @@ public class OutfitService {
     }
 
     public List<OutfitResponseDto> getInfiniteScroll(int offset, int limit) {
-        Pageable pageable = PageRequest.of(offset / Math.min(limit, 50), Math.min(limit, 50));
         Jwt jwt = currentJwt();
-        Page<Outfit> pageResult = isSupervisor(jwt)
-                ? outfitRepository.findAll(pageable)
-                : outfitRepository.findAllByUserId(requireUserId(jwt), pageable);
+        int actualLimit = Math.min(limit, 50);
+        long fromId = offset;
 
-        return pageResult.getContent()
-                .stream()
-                .map(outfitMapper::toDto)
-                .toList();
+        List<Outfit> outfits = isSupervisor(jwt)
+                ? outfitRepository.findAllScrollFromId(fromId, actualLimit)
+                : outfitRepository.findAllByUserIdScrollFromId(requireUserId(jwt), fromId, actualLimit);
+
+        return outfits.stream().map(outfitMapper::toDto).toList();
     }
 
     public OutfitResponseDto getById(Long id) {
@@ -73,6 +76,55 @@ public class OutfitService {
         Outfit outfit = outfitRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Outfit not found with id: " + id));
         return outfitMapper.toDto(outfit);
+    }
+
+    /**
+     * Same as {@link #getById(Long)} but also enriches each item link with full wardrobe item details.
+     * Used by REST endpoint GET /outfits/{id} to "show items подробно" by default.
+     */
+    public OutfitResponseDto getByIdWithItemDetails(Long id) {
+        OutfitResponseDto basic = getById(id);
+        Jwt jwt = currentJwt();
+        String bearer = "Bearer " + jwt.getTokenValue();
+
+        List<OutfitItemLinkDto> enrichedItems = (basic.items() == null ? List.<OutfitItemLinkDto>of() : basic.items())
+                .stream()
+                .map(link -> {
+                    try {
+                        var item = wardrobeServiceClientWrapper.getItemById(bearer, link.itemId());
+                        return new OutfitItemLinkDto(link.itemId(), link.role(), item);
+                    } catch (ResponseStatusException ex) {
+                        // If item is missing/not accessible OR wardrobe-service is temporarily unavailable,
+                        // keep basic link so outfit still renders (do not fail whole GET /outfits/{id}).
+                        if (ex.getStatusCode().value() == 404
+                                || ex.getStatusCode().value() == 403
+                                || ex.getStatusCode().value() == 503) {
+                            return new OutfitItemLinkDto(link.itemId(), link.role(), null);
+                        }
+                        throw ex;
+                    }
+                })
+                .toList();
+
+        return new OutfitResponseDto(basic.id(), basic.title(), basic.userId(), enrichedItems);
+    }
+
+    public OutfitDetailedResponseDto getDetailedById(Long id) {
+        // reuse access rules from getById
+        OutfitResponseDto basic = getById(id);
+        return toDetailed(basic);
+    }
+
+    public List<OutfitResponseDto> getMyOutfits() {
+        Jwt jwt = currentJwt();
+        Long userId = requireUserId(jwt);
+        return outfitRepository.findAllByUserId(userId).stream()
+                .map(outfitMapper::toDto)
+                .toList();
+    }
+
+    public List<OutfitDetailedResponseDto> getMyOutfitsDetailed() {
+        return getMyOutfits().stream().map(this::toDetailed).toList();
     }
 
     @Transactional
@@ -115,6 +167,12 @@ public class OutfitService {
         outfitMapper.updateEntityFromDto(dto, outfit);
         applyItemsFromDto(dto, outfit);
         return outfitMapper.toDto(outfitRepository.save(outfit));
+    }
+
+    @Transactional
+    public OutfitDetailedResponseDto updateDetailed(Long id, OutfitDto dto) {
+        OutfitResponseDto updated = update(id, dto);
+        return toDetailed(updated);
     }
 
     @Transactional
@@ -180,6 +238,30 @@ public class OutfitService {
         return jwtAuth.getToken();
     }
 
+    private String bearer(Jwt jwt) {
+        return "Bearer " + jwt.getTokenValue();
+    }
+
+    private OutfitDetailedResponseDto toDetailed(OutfitResponseDto basic) {
+        Jwt jwt = currentJwt();
+        String authorization = bearer(jwt);
+
+        List<OutfitItemDetailedDto> detailedItems = (basic.items() == null ? List.<OutfitItemLinkDto>of() : basic.items())
+                .stream()
+                .map(link -> {
+                    var item = wardrobeServiceClientWrapper.getItemById(authorization, link.itemId());
+                    return new OutfitItemDetailedDto(link.itemId(), link.role(), item);
+                })
+                .toList();
+
+        return new OutfitDetailedResponseDto(
+                basic.id(),
+                basic.title(),
+                basic.userId(),
+                detailedItems
+        );
+    }
+
     private static Long requireUserId(Jwt jwt) {
         String userId = jwt.getClaimAsString("userId");
         if (userId == null || userId.isBlank()) {
@@ -195,9 +277,13 @@ public class OutfitService {
     private static boolean isSupervisor(Jwt jwt) {
         Object roles = jwt.getClaims().get("roles");
         if (roles instanceof java.util.Collection<?> c) {
-            return c.stream().anyMatch(r -> "ROLE_SUPERVISOR".equals(String.valueOf(r)) || "ROLE_ADMIN".equals(String.valueOf(r)));
+            return c.stream().anyMatch(r ->
+                    "ROLE_SUPERVISOR".equals(String.valueOf(r))
+                            || "ROLE_MODERATOR".equals(String.valueOf(r))
+                            || "ROLE_ADMIN".equals(String.valueOf(r))
+            );
         }
         String str = roles == null ? "" : roles.toString();
-        return str.contains("ROLE_SUPERVISOR") || str.contains("ROLE_ADMIN");
+        return str.contains("ROLE_SUPERVISOR") || str.contains("ROLE_MODERATOR") || str.contains("ROLE_ADMIN");
     }
 }

@@ -92,6 +92,16 @@ class WardrobeItemServiceTest {
         return new JwtAuthenticationToken(jwt);
     }
 
+    private JwtAuthenticationToken moderatorAuth(long userId) {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .subject("moderator@example.com")
+                .claim("userId", String.valueOf(userId))
+                .claim("roles", List.of("ROLE_MODERATOR"))
+                .build();
+        return new JwtAuthenticationToken(jwt);
+    }
+
     @Test
     void getItemsUpTo50_shouldReturnPagedResult() {
         // Given
@@ -351,6 +361,23 @@ class WardrobeItemServiceTest {
 
         StepVerifier.create(wardrobeItemService.create(createDto)
                         .contextWrite(ReactiveSecurityContextHolder.withAuthentication(userAuth(1L))))
+                .expectErrorMatches(t ->
+                        t instanceof org.springframework.web.server.ResponseStatusException rse
+                                && rse.getStatusCode().value() == FORBIDDEN.value())
+                .verify();
+
+        verify(userServiceClientWrapper, never()).getUserById(anyLong());
+        verify(itemRepository, never()).save(any());
+    }
+
+    @Test
+    void create_shouldReturn403_whenRoleModeratorCreatesForOtherOwner() {
+        WardrobeItemDto createDto = new WardrobeItemDto(
+                ItemType.SHIRT, "Nike", "Blue", Season.SUMMER, "image.jpg", 999L
+        );
+
+        StepVerifier.create(wardrobeItemService.create(createDto)
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(moderatorAuth(1L))))
                 .expectErrorMatches(t ->
                         t instanceof org.springframework.web.server.ResponseStatusException rse
                                 && rse.getStatusCode().value() == FORBIDDEN.value())

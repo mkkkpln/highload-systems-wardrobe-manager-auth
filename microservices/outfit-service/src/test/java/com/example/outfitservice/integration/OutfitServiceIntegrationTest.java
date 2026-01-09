@@ -67,6 +67,16 @@ public class OutfitServiceIntegrationTest {
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
     }
 
+    private void asModerator(long userId) {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+                .header("alg", "none")
+                .subject("moderator@example.com")
+                .claim("userId", String.valueOf(userId))
+                .claim("roles", List.of("ROLE_MODERATOR"))
+                .build();
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
+    }
+
     @Test
     void shouldCreateOutfit() {
         asUser(1L);
@@ -91,6 +101,24 @@ public class OutfitServiceIntegrationTest {
         assertThat(created.title()).isEqualTo("Summer Outfit");
         assertThat(created.userId()).isEqualTo(1L);
         // items mapping/relationship isn't guaranteed to be returned by mapper; validate core fields only
+    }
+
+    @Test
+    void moderatorShouldCreateOutfitForOtherUser() {
+        asModerator(998L);
+        Mockito.when(userServiceClientWrapper.getUserById(anyString(), anyLong()))
+                .thenReturn(new UserDto(2L, "u2@example.com", "User2"));
+
+        OutfitDto createDto = new OutfitDto(
+                "Moderator Outfit",
+                2L,
+                List.of(new OutfitItemLinkDto(1L, OutfitRole.TOP))
+        );
+
+        OutfitResponseDto created = outfitService.create(createDto);
+        assertThat(created.id()).isNotNull();
+        assertThat(created.userId()).isEqualTo(2L);
+        assertThat(created.title()).isEqualTo("Moderator Outfit");
     }
 
     @Test

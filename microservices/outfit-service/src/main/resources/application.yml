@@ -7,6 +7,18 @@ spring:
     openfeign:
       circuitbreaker:
         enabled: true
+      client:
+        config:
+          user-service:
+            url: ${clients.user-service.base-url:http://user-service:8081}
+          wardrobe-service:
+            url: ${clients.wardrobe-service.base-url:http://wardrobe-service:8082}
+
+clients:
+  user-service:
+    base-url: ${USER_SERVICE_URL:http://user-service:8081}
+  wardrobe-service:
+    base-url: ${WARDROBE_SERVICE_URL:http://wardrobe-service:8082}
 
 management:
   endpoints:
